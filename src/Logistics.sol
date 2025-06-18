@@ -60,6 +60,9 @@ contract RealWorldItemNFT is ERC721, Ownable {
     /// @dev mapping from realId to tokenId for reverse lookups
     mapping(string => uint256) private s_realIdToTokenId;
 
+    /// @dev array to store all realIds
+    string[] private s_allRealIds;
+
     /// @dev incremental token IDs
     uint256 public nextTokenId;
 
@@ -120,7 +123,7 @@ contract RealWorldItemNFT is ERC721, Ownable {
         }
         // check if realId already exists
         uint256 existingTokenId = s_realIdToTokenId[params.realId];
-        if (existingTokenId != 0 || bytes(s_itemDetails[0].s_itemIdentifier).length != 0) {
+        if (existingTokenId != 0) {
             revert DuplicateRealId();
         }
 
@@ -136,6 +139,9 @@ contract RealWorldItemNFT is ERC721, Ownable {
 
         // store the reverse mapping
         s_realIdToTokenId[params.realId] = tokenId;
+        
+        // add realId to the array of all realIds
+        s_allRealIds.push(params.realId);
 
         _safeMint(params.to, tokenId);
         
@@ -216,6 +222,11 @@ contract RealWorldItemNFT is ERC721, Ownable {
         return super.ownerOf(tokenId);
     }
 
+    /// @notice Get all real world identifiers that have been minted
+    /// @return array of all realIds
+    function getAllRealIds() external view returns (string[] memory) {
+        return s_allRealIds;
+    }
 
     // /// @notice Set the base URI for token metadata
     // /// @dev Only callable by contract owner
