@@ -23,7 +23,7 @@ contract RealWorldItemNFT is ERC721, Ownable {
     error EmptyString();
     error ItemNotFound();
     error DuplicateRealId();
-
+    error ItemAlreadyReachedFinalRecipient();
 
     /*//////////////////////////////////////////////////////////////
                             TYPE DECLARATIONS
@@ -36,10 +36,12 @@ contract RealWorldItemNFT is ERC721, Ownable {
     }
 
     struct ItemDetails {
+        address s_originAddress;
         string s_itemName;
         string s_locationOrigin;
         address s_finalRecipient;
         string s_itemIdentifier; 
+        bool s_recipientReached;
     }
 
     /// @notice parameters for minting a new item
@@ -89,7 +91,8 @@ contract RealWorldItemNFT is ERC721, Ownable {
         uint256 tokenId,
         address indexed from,
         address indexed to,
-        uint indexed timestamp
+        uint timestamp,
+        bool indexed recipientReached
     );
 
     /*//////////////////////////////////////////////////////////////
@@ -127,14 +130,18 @@ contract RealWorldItemNFT is ERC721, Ownable {
             revert DuplicateRealId();
         }
 
+        
+
         uint256 tokenId = nextTokenId++;
         
         // store all item details
         s_itemDetails[tokenId] = ItemDetails({
+            s_originAddress: params.to,
             s_itemName: params.itemName,
             s_locationOrigin: params.locationOrigin,
             s_finalRecipient: params.finalRecipient,
-            s_itemIdentifier: params.realId
+            s_itemIdentifier: params.realId,
+            s_recipientReached: false
         });
 
         // store the reverse mapping
@@ -177,6 +184,11 @@ contract RealWorldItemNFT is ERC721, Ownable {
         if (to == address(0)) {
             revert InvalidAddress();
         }
+        
+        // prevent transfer if already reached final recipient
+        if (s_itemDetails[tokenId].s_recipientReached) {
+            revert ItemAlreadyReachedFinalRecipient();
+        }
 
         // remove realId from sender's array
         string[] storage senderRealIds = s_realIdsByAddress[msg.sender];
@@ -189,7 +201,7 @@ contract RealWorldItemNFT is ERC721, Ownable {
             }
         }
 
-        // Add realId to recipient's array
+        // add realId to recipient's array
         s_realIdsByAddress[to].push(realId);
 
         // append this leg to the on-chain history
@@ -202,12 +214,18 @@ contract RealWorldItemNFT is ERC721, Ownable {
         // move the NFT
         _safeTransfer(msg.sender, to, tokenId, "");
 
+        // update reached status only if reaching final recipient for the first time
+        if (to == s_itemDetails[tokenId].s_finalRecipient) {
+            s_itemDetails[tokenId].s_recipientReached = true;
+        }
+
         // emit the transfer event
         emit ItemTransferred(
             tokenId,
             msg.sender,
             to,
-            block.timestamp
+            block.timestamp,
+            s_itemDetails[tokenId].s_recipientReached
         );
     }
 
@@ -225,6 +243,49 @@ contract RealWorldItemNFT is ERC721, Ownable {
             revert ItemNotFound();
         }
         return s_itemDetails[tokenId];
+    }
+
+    /// @notice get all details of NFT tokens owned by a specific address
+    /// @param _address the address to query items for
+    /// @return array of ItemDetails structs containing information for all items owned by the address
+    function getItemDetailsByAddress(address _address) external view returns (ItemDetails[] memory) {
+        string[] memory realIds = s_realIdsByAddress[_address];
+        
+        ItemDetails[] memory details = new ItemDetails[](realIds.length);
+        
+        for (uint256 i = 0; i < realIds.length; i++) {
+            uint256 tokenId = s_realIdToTokenId[realIds[i]];
+            details[i] = s_itemDetails[tokenId];
+        }
+        
+        return details;
+    }
+
+    /// @notice get all details of NFT tokens owned by the origin address
+    /// @param _address the origin address to query items for
+    /// @return array of ItemDetails structs containing information for all items owned by the address
+    function getItemDetailsByOriginAddress(address _address) external view returns (ItemDetails[] memory) {
+        // count how many items have this origin address
+        uint256 count = 0;
+        for (uint256 i = 0; i < nextTokenId; i++) {
+            if (s_itemDetails[i].s_originAddress == _address) {
+                count++;
+            }
+        }
+
+        // array of correct size
+        ItemDetails[] memory details = new ItemDetails[](count);
+        
+        // fill array with matching items
+        uint256 currentIndex = 0;
+        for (uint256 i = 0; i < nextTokenId; i++) {
+            if (s_itemDetails[i].s_originAddress == _address) {
+                details[currentIndex] = s_itemDetails[i];
+                currentIndex++;
+            }
+        }
+        
+        return details;
     }
 
     /// @notice Get the owner of an item using its real world identifier
