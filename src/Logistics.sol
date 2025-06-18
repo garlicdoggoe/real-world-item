@@ -42,7 +42,7 @@ contract RealWorldItemNFT is ERC721, Ownable {
         string s_itemIdentifier; 
     }
 
-    /// @notice Parameters for minting a new item
+    /// @notice parameters for minting a new item
     struct MintParams {
         string realId;
         address to;
@@ -60,14 +60,14 @@ contract RealWorldItemNFT is ERC721, Ownable {
     /// @dev mapping from realId to tokenId for reverse lookups
     mapping(string => uint256) private s_realIdToTokenId;
 
-    /// @dev array to store all realIds
-    string[] private s_allRealIds;
+    /// @dev mapping to store all realIds for a given address
+    mapping(address => string[]) private s_realIdsByAddress;
 
     /// @dev incremental token IDs
     uint256 public nextTokenId;
 
-    /// @dev Base URI for computing {tokenURI}. Can be updated by owner.
-    string private s_baseURI;
+    // /// @dev Base URI for computing {tokenURI}. Can be updated by owner.
+    // string private s_baseURI;
 
     /*//////////////////////////////////////////////////////////////
                                 EVENTS
@@ -97,7 +97,7 @@ contract RealWorldItemNFT is ERC721, Ownable {
     //////////////////////////////////////////////////////////////*/
 
     constructor(address initialOwner) ERC721("Real World Items", "RWI") Ownable(initialOwner) {
-        s_baseURI = ""; // Initialize with empty string, can be updated later
+        // s_baseURI = ""; // Initialize with empty string, can be updated later
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -109,7 +109,7 @@ contract RealWorldItemNFT is ERC721, Ownable {
     /// @notice can add a function on the app where registered accounts are only addresses that in the whitelist
     /// @param params struct containing all parameters for minting
     function mint(MintParams calldata params) external {
-        if (params.finalRecipient == address(0)) {
+        if (params.finalRecipient == address(0) || params.to == address(0)) {
             revert InvalidAddress();
         }
         if (bytes(params.itemName).length == 0) {
@@ -140,8 +140,8 @@ contract RealWorldItemNFT is ERC721, Ownable {
         // store the reverse mapping
         s_realIdToTokenId[params.realId] = tokenId;
         
-        // add realId to the array of all realIds
-        s_allRealIds.push(params.realId);
+        // add realId to the array of realIds for this address
+        s_realIdsByAddress[params.to].push(params.realId);
 
         _safeMint(params.to, tokenId);
         
@@ -177,12 +177,28 @@ contract RealWorldItemNFT is ERC721, Ownable {
         if (to == address(0)) {
             revert InvalidAddress();
         }
+
+        // remove realId from sender's array
+        string[] storage senderRealIds = s_realIdsByAddress[msg.sender];
+        for (uint i = 0; i < senderRealIds.length; i++) {
+            if (keccak256(bytes(senderRealIds[i])) == keccak256(bytes(realId))) {
+                // move the last element to this position and pop the last element
+                senderRealIds[i] = senderRealIds[senderRealIds.length - 1];
+                senderRealIds.pop();
+                break;
+            }
+        }
+
+        // Add realId to recipient's array
+        s_realIdsByAddress[to].push(realId);
+
         // append this leg to the on-chain history
         s_history[tokenId].push(TransferRecord({
             from: msg.sender,
             to: to,
             timestamp: block.timestamp
         }));
+        
         // move the NFT
         _safeTransfer(msg.sender, to, tokenId, "");
 
@@ -222,10 +238,10 @@ contract RealWorldItemNFT is ERC721, Ownable {
         return super.ownerOf(tokenId);
     }
 
-    /// @notice Get all real world identifiers that have been minted
+    /// @notice get all real world identifiers that have been minted
     /// @return array of all realIds
-    function getAllRealIds() external view returns (string[] memory) {
-        return s_allRealIds;
+    function getAllRealIdsByAddress(address _address) external view returns (string[] memory) {
+        return s_realIdsByAddress[_address];
     }
 
     // /// @notice Set the base URI for token metadata
@@ -250,4 +266,29 @@ contract RealWorldItemNFT is ERC721, Ownable {
     // function _baseURI() internal view virtual override returns (string memory) {
     //     return s_baseURI;
     // }
+
+    /// @notice get all real world identifiers that have been minted
+    /// @return array of all realIds
+    function getAllAddressesWithDetails() external view returns (MintParams[] memory) {
+        // first count total number of items to size our array
+        uint256 totalItems = nextTokenId;
+        
+        MintParams[] memory allDetails = new MintParams[](totalItems);
+        
+        // iterate through all the NFTs
+        for (uint256 i = 0; i < totalItems; i++) {
+            ItemDetails memory details = s_itemDetails[i];
+            address currentOwner = ownerOf(i);
+            
+            allDetails[i] = MintParams({
+                realId: details.s_itemIdentifier,
+                to: currentOwner,
+                itemName: details.s_itemName,
+                locationOrigin: details.s_locationOrigin,
+                finalRecipient: details.s_finalRecipient
+            });
+        }
+        
+        return allDetails;
+    }
 }

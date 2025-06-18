@@ -249,4 +249,119 @@ contract LogisticsTest is Test {
         vm.expectRevert(RealWorldItemNFT.ItemNotFound.selector);
         realWorldItem.ownerOfByRealId("NONEXISTENT_ID");
     }
+
+    function test_GetAllRealIdsByAddress() public {
+        // arrange - mint multiple items for USER
+        string memory realId1 = "TEST123";
+        string memory realId2 = "TEST456";
+        
+        RealWorldItemNFT.MintParams memory params1 = RealWorldItemNFT.MintParams({
+            realId: realId1,
+            to: USER,
+            itemName: ITEM_NAME,
+            locationOrigin: locationOrigin,
+            finalRecipient: RECIPIENT
+        });
+
+        RealWorldItemNFT.MintParams memory params2 = RealWorldItemNFT.MintParams({
+            realId: realId2,
+            to: USER,
+            itemName: ITEM_NAME,
+            locationOrigin: locationOrigin,
+            finalRecipient: RECIPIENT
+        });
+
+        realWorldItem.mint(params1);
+        realWorldItem.mint(params2);
+
+        // act
+        string[] memory userRealIds = realWorldItem.getAllRealIdsByAddress(USER);
+
+        // assert
+        assertEq(userRealIds.length, 2);
+        assertEq(userRealIds[0], realId1);
+        assertEq(userRealIds[1], realId2);
+    }
+
+    function test_GetAllRealIdsByAddress_EmptyForNewAddress() public {
+        // act
+        string[] memory realIds = realWorldItem.getAllRealIdsByAddress(makeAddr("newUser"));
+
+        // assert
+        assertEq(realIds.length, 0);
+    }
+
+    function test_GetAllRealIdsByAddress_AfterTransfer() public {
+        // arrange - mint an item for USER
+        string memory realId = "TEST123";
+        RealWorldItemNFT.MintParams memory params = RealWorldItemNFT.MintParams({
+            realId: realId,
+            to: USER,
+            itemName: ITEM_NAME,
+            locationOrigin: locationOrigin,
+            finalRecipient: RECIPIENT
+        });
+        realWorldItem.mint(params);
+
+        // act - transfer the item to RECIPIENT
+        vm.prank(USER);
+        realWorldItem.transferItem(realId, RECIPIENT);
+
+        // assert - check both addresses
+        string[] memory userRealIds = realWorldItem.getAllRealIdsByAddress(USER);
+        string[] memory recipientRealIds = realWorldItem.getAllRealIdsByAddress(RECIPIENT);
+
+        assertEq(userRealIds.length, 0, "Original owner should have no items");
+        assertEq(recipientRealIds.length, 1, "Recipient should have one item");
+        assertEq(recipientRealIds[0], realId, "Recipient should have the transferred item");
+    }
+
+    function test_GetAllAddressesWithDetails() public {
+        // arrange - mint multiple items with different parameters
+        address recipient2 = makeAddr("recipient2");
+        
+        RealWorldItemNFT.MintParams memory params1 = RealWorldItemNFT.MintParams({
+            realId: "TEST123",
+            to: USER,
+            itemName: "Item 1",
+            locationOrigin: "Location 1",
+            finalRecipient: RECIPIENT
+        });
+
+        RealWorldItemNFT.MintParams memory params2 = RealWorldItemNFT.MintParams({
+            realId: "TEST456",
+            to: RECIPIENT,
+            itemName: "Item 2",
+            locationOrigin: "Location 2",
+            finalRecipient: recipient2
+        });
+
+        // mint the items
+        realWorldItem.mint(params1);
+        realWorldItem.mint(params2);
+
+        // transfer first item to create some history
+        vm.prank(USER);
+        realWorldItem.transferItem("TEST123", RECIPIENT);
+
+        // act
+        RealWorldItemNFT.MintParams[] memory allDetails = realWorldItem.getAllAddressesWithDetails();
+
+        // assert
+        assertEq(allDetails.length, 2, "Should return details for 2 items");
+
+        // verify first item details
+        assertEq(allDetails[0].realId, "TEST123", "First item realId should match");
+        assertEq(allDetails[0].to, RECIPIENT, "First item current owner should be RECIPIENT after transfer");
+        assertEq(allDetails[0].itemName, "Item 1", "First item name should match");
+        assertEq(allDetails[0].locationOrigin, "Location 1", "First item location should match");
+        assertEq(allDetails[0].finalRecipient, RECIPIENT, "First item final recipient should match");
+
+        // verify second item details
+        assertEq(allDetails[1].realId, "TEST456", "Second item realId should match");
+        assertEq(allDetails[1].to, RECIPIENT, "Second item owner should match");
+        assertEq(allDetails[1].itemName, "Item 2", "Second item name should match");
+        assertEq(allDetails[1].locationOrigin, "Location 2", "Second item location should match");
+        assertEq(allDetails[1].finalRecipient, recipient2, "Second item final recipient should match");
+    }
 }
