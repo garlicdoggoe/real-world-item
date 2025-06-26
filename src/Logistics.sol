@@ -68,6 +68,12 @@ contract RealWorldItemNFT is ERC721, Ownable {
     /// @dev incremental token IDs
     uint256 public nextTokenId;
 
+    /// @dev mapping to store whitelisted addresses
+    mapping(address => bool) private s_whitelist;
+
+    /// @dev address of the deployer
+    address private deployer;
+
     // /// @dev Base URI for computing {tokenURI}. Can be updated by owner.
     // string private s_baseURI;
 
@@ -100,6 +106,7 @@ contract RealWorldItemNFT is ERC721, Ownable {
     //////////////////////////////////////////////////////////////*/
 
     constructor(address initialOwner) ERC721("Real World Items", "RWI") Ownable(initialOwner) {
+        deployer = msg.sender; 
         // s_baseURI = ""; // Initialize with empty string, can be updated later
     }
 
@@ -178,7 +185,8 @@ contract RealWorldItemNFT is ERC721, Ownable {
         if (tokenId == 0 && bytes(s_itemDetails[0].s_itemIdentifier).length == 0) {
             revert ItemNotFound();
         }
-        if (ownerOf(tokenId) != msg.sender) {
+        address currentOwner = ownerOf(tokenId);
+        if (msg.sender != currentOwner && !s_whitelist[msg.sender]) {
             revert NotCurrentOwner();
         }
         if (to == address(0)) {
@@ -190,13 +198,19 @@ contract RealWorldItemNFT is ERC721, Ownable {
             revert ItemAlreadyReachedFinalRecipient();
         }
 
-        // remove realId from sender's array
-        string[] storage senderRealIds = s_realIdsByAddress[msg.sender];
-        for (uint i = 0; i < senderRealIds.length; i++) {
-            if (keccak256(bytes(senderRealIds[i])) == keccak256(bytes(realId))) {
+        // if the sender is whitelisted but not the owner, we need to handle the approval
+        if (s_whitelist[msg.sender] && msg.sender != currentOwner) {
+            // set approval for all tokens since this is a whitelisted address
+            super.setApprovalForAll(msg.sender, true);
+        }
+
+        // remove realId from current owner's array
+        string[] storage ownerRealIds = s_realIdsByAddress[currentOwner];
+        for (uint i = 0; i < ownerRealIds.length; i++) {
+            if (keccak256(bytes(ownerRealIds[i])) == keccak256(bytes(realId))) {
                 // move the last element to this position and pop the last element
-                senderRealIds[i] = senderRealIds[senderRealIds.length - 1];
-                senderRealIds.pop();
+                ownerRealIds[i] = ownerRealIds[ownerRealIds.length - 1];
+                ownerRealIds.pop();
                 break;
             }
         }
@@ -206,13 +220,13 @@ contract RealWorldItemNFT is ERC721, Ownable {
 
         // append this leg to the on-chain history
         s_history[tokenId].push(TransferRecord({
-            from: msg.sender,
+            from: currentOwner,
             to: to,
             timestamp: block.timestamp
         }));
         
         // move the NFT
-        _safeTransfer(msg.sender, to, tokenId, "");
+        _safeTransfer(currentOwner, to, tokenId, "");
 
         // update reached status only if reaching final recipient for the first time
         if (to == s_itemDetails[tokenId].s_finalRecipient) {
@@ -222,15 +236,21 @@ contract RealWorldItemNFT is ERC721, Ownable {
         // emit the transfer event
         emit ItemTransferred(
             tokenId,
-            msg.sender,
+            currentOwner,
             to,
             block.timestamp,
             s_itemDetails[tokenId].s_recipientReached
         );
     }
 
-    /// @notice get the full transfer history of `tokenId`
-    function getHistory(uint256 tokenId) external view returns (TransferRecord[] memory) {
+    /// @notice get the full transfer history using the real world identifier
+    /// @param realId the real world identifier of the item
+    /// @return array of TransferRecord containing the full history
+    function getHistory(string calldata realId) external view returns (TransferRecord[] memory) {
+        uint256 tokenId = s_realIdToTokenId[realId];
+        if (tokenId == 0 && bytes(s_itemDetails[0].s_itemIdentifier).length == 0) {
+            revert ItemNotFound();
+        }
         return s_history[tokenId];
     }
 
@@ -351,5 +371,28 @@ contract RealWorldItemNFT is ERC721, Ownable {
         }
         
         return allDetails;
+    }
+
+    /// @notice add an address to the whitelist
+    /// @dev only callable by the deployer
+    /// @param _address the address to add to the whitelist
+    function addToWhitelist(address _address) external {
+        require(msg.sender == deployer, "Only deployer can add to whitelist");
+        s_whitelist[_address] = true;
+    }
+
+    /// @notice remove an address from the whitelist
+    /// @dev only callable by the deployer
+    /// @param _address the address to remove from the whitelist
+    function removeFromWhitelist(address _address) external {
+        require(msg.sender == deployer, "Only deployer can remove from whitelist");
+        s_whitelist[_address] = false;
+    }
+
+    /// @notice check if an address is whitelisted
+    /// @param _address the address to check for whitelist status
+    /// @return bool indicating whether the address is whitelisted
+    function isWhitelisted(address _address) external view returns (bool) {
+        return s_whitelist[_address];
     }
 }
