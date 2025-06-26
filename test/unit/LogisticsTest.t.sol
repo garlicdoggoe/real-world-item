@@ -9,6 +9,7 @@ contract LogisticsTest is Test {
     address public OWNER = makeAddr("owner");
     address public USER = makeAddr("user");
     address public RECIPIENT = makeAddr("recipient");
+    address public deployer = makeAddr("deployer");
 
     // test item parameters
     string constant ITEM_NAME = "Test Item";
@@ -16,7 +17,7 @@ contract LogisticsTest is Test {
     string constant REAL_ID = "TEST123";
 
     function setUp() public {
-        vm.startPrank(OWNER);
+        vm.startPrank(deployer);
         realWorldItem = new RealWorldItemNFT(OWNER);
         vm.stopPrank();
     }
@@ -41,7 +42,7 @@ contract LogisticsTest is Test {
         // assert
         assertEq(realWorldItem.ownerOf(0), USER);
 
-        RealWorldItemNFT.TransferRecord[] memory history = realWorldItem.getHistory(0);
+        RealWorldItemNFT.TransferRecord[] memory history = realWorldItem.getHistory(REAL_ID);
         assertEq(history.length, 1);
         assertEq(history[0].from, address(0));
         assertEq(history[0].to, USER);
@@ -119,7 +120,7 @@ contract LogisticsTest is Test {
         // assert
         assertEq(realWorldItem.ownerOf(0), RECIPIENT);
         
-        RealWorldItemNFT.TransferRecord[] memory history = realWorldItem.getHistory(0);
+        RealWorldItemNFT.TransferRecord[] memory history = realWorldItem.getHistory(REAL_ID);
         assertEq(history.length, 2);
         assertEq(history[1].from, USER);
         assertEq(history[1].to, RECIPIENT);
@@ -227,7 +228,7 @@ contract LogisticsTest is Test {
         realWorldItem.transferItem(REAL_ID, RECIPIENT);
 
         // act
-        RealWorldItemNFT.TransferRecord[] memory history = realWorldItem.getHistory(0);
+        RealWorldItemNFT.TransferRecord[] memory history = realWorldItem.getHistory(REAL_ID);
 
         // assert
         assertEq(history.length, 2);
@@ -241,6 +242,12 @@ contract LogisticsTest is Test {
         // verify recipientReached is true after transfer to final recipient
         RealWorldItemNFT.ItemDetails memory details = realWorldItem.getItemDetailsByRealId(REAL_ID);
         assertEq(details.s_recipientReached, true);
+    }
+
+    function test_RevertWhen_GetHistoryNonexistentRealId() public {
+        // act & assert
+        vm.expectRevert(RealWorldItemNFT.ItemNotFound.selector);
+        realWorldItem.getHistory("NONEXISTENT_ID");
     }
 
     function test_OwnerOfByRealId() public {
@@ -610,5 +617,124 @@ contract LogisticsTest is Test {
         // test address that hasn't originated any items
         RealWorldItemNFT.ItemDetails[] memory emptyDetails = realWorldItem.getItemDetailsByOriginAddress(makeAddr("emptyAddress"));
         assertEq(emptyDetails.length, 0, "Should return empty array for address with no originated items");
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                        WHITELIST TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    function test_AddToWhitelist() public {
+        // arrange
+        address whitelistedUser = makeAddr("whitelistedUser");
+        
+                 // act - add to whitelist as deployer
+         vm.prank(deployer);
+         realWorldItem.addToWhitelist(whitelistedUser);
+
+         // mint an item to USER
+        RealWorldItemNFT.MintParams memory params = RealWorldItemNFT.MintParams({
+            realId: REAL_ID,
+            to: USER,
+            itemName: ITEM_NAME,
+            locationOrigin: locationOrigin,
+            finalRecipient: RECIPIENT
+        });
+        realWorldItem.mint(params);
+
+        // assert - whitelisted user can transfer item they don't own
+        vm.prank(whitelistedUser);
+        realWorldItem.transferItem(REAL_ID, RECIPIENT);
+
+        assertEq(realWorldItem.ownerOf(0), RECIPIENT);
+    }
+
+    function test_RemoveFromWhitelist() public {
+        // arrange
+        address whitelistedUser = makeAddr("whitelistedUser");
+        
+                 // first add to whitelist
+         vm.prank(deployer);
+         realWorldItem.addToWhitelist(whitelistedUser);
+
+         // mint an item to USER
+        RealWorldItemNFT.MintParams memory params = RealWorldItemNFT.MintParams({
+            realId: REAL_ID,
+            to: USER,
+            itemName: ITEM_NAME,
+            locationOrigin: locationOrigin,
+            finalRecipient: RECIPIENT
+        });
+        realWorldItem.mint(params);
+
+                 // remove from whitelist
+         vm.prank(deployer);
+         realWorldItem.removeFromWhitelist(whitelistedUser);
+
+         // assert - previously whitelisted user can no longer transfer
+        vm.prank(whitelistedUser);
+        vm.expectRevert(RealWorldItemNFT.NotCurrentOwner.selector);
+        realWorldItem.transferItem(REAL_ID, RECIPIENT);
+    }
+
+    function test_RevertWhen_NonDeployerAddsToWhitelist() public {
+        // arrange
+        address whitelistedUser = makeAddr("whitelistedUser");
+        
+        // act & assert - try to add to whitelist as non-deployer
+        vm.prank(USER);
+        vm.expectRevert("Only deployer can add to whitelist");
+        realWorldItem.addToWhitelist(whitelistedUser);
+    }
+
+    function test_RevertWhen_NonDeployerRemovesFromWhitelist() public {
+        // arrange
+        address whitelistedUser = makeAddr("whitelistedUser");
+        
+                 // first add to whitelist properly
+         vm.prank(deployer);
+         realWorldItem.addToWhitelist(whitelistedUser);
+
+         // act & assert - try to remove from whitelist as non-deployer
+        vm.prank(USER);
+        vm.expectRevert("Only deployer can remove from whitelist");
+        realWorldItem.removeFromWhitelist(whitelistedUser);
+    }
+
+    function test_WhitelistedUserCanTransferMultipleItems() public {
+        // arrange
+        address whitelistedUser = makeAddr("whitelistedUser");
+        
+                 // add to whitelist
+         vm.prank(deployer);
+         realWorldItem.addToWhitelist(whitelistedUser);
+
+         // mint multiple items to different users
+        RealWorldItemNFT.MintParams memory params1 = RealWorldItemNFT.MintParams({
+            realId: "TEST123",
+            to: USER,
+            itemName: "Item 1",
+            locationOrigin: locationOrigin,
+            finalRecipient: RECIPIENT
+        });
+
+        RealWorldItemNFT.MintParams memory params2 = RealWorldItemNFT.MintParams({
+            realId: "TEST456",
+            to: makeAddr("otherUser"),
+            itemName: "Item 2",
+            locationOrigin: locationOrigin,
+            finalRecipient: RECIPIENT
+        });
+
+        realWorldItem.mint(params1);
+        realWorldItem.mint(params2);
+
+        // assert - whitelisted user can transfer both items
+        vm.startPrank(whitelistedUser);
+        realWorldItem.transferItem("TEST123", RECIPIENT);
+        realWorldItem.transferItem("TEST456", RECIPIENT);
+        vm.stopPrank();
+
+        assertEq(realWorldItem.ownerOf(0), RECIPIENT);
+        assertEq(realWorldItem.ownerOf(1), RECIPIENT);
     }
 }
